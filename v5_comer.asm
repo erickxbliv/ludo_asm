@@ -1,14 +1,20 @@
 .data
-	caminho: .asciiz "a----------b----------c----------d----------|   \n"		#esses espacos ajuda a ver se alguem sair (e alinham o endereco para um valor par)
+	caminho: .asciiz "-----------b----------c----------d----------|   \n"		#esses espacos ajuda a ver se alguem sair (e alinham o endereco para um valor par)
 	vitoria_a: .asciiz "-----"		#o tubo da vitoria so vai ate o penultimo, o primeiro a sair fica na ponta, o ultimo no centro (102)
 	vitoria_b: .asciiz "-----"
 	vitoria_c: .asciiz "-----"
 	vitoria_d: .asciiz "-----"
 	
-	tubo_a: .word 0
+	status_a: .word 0	#0 - dormindo, 1 - jogando, 2 - tubo, 3 - ganhou?
 	tubo_b: .word 0
 	tubo_c: .word 0
 	tubo_d: .word 0
+	
+	
+	dormindo_a: .word 17
+	dormindo_b: .word 25
+	dormindo_c: .word 145
+	dormindo_d: .word 153
 	
 	rota: .word 81,82,83,84,69,53,37,21,5,6,7,23,39,55,71,88,89,90,91,92,108,124,123,122,121,120,135,151,167,183,199,198,197,
 	181,165,149,133,116,115,114,113,112,96,80
@@ -25,9 +31,10 @@
 	primeira_d: .word 33
 	
 	estrelas: .word 81,23,123,181		#casa onde a peca comeca, e onde nascem pecas novas PELO VETOR MATRIZ DO TABULEIRO
+	camas: .word 17,25,153, 145
 	
 	
-	ultima_a: .word 100	#41		#o peao A nunca da a volta no tabuleiro
+	ultima_a: .word 41	#41		#o peao A nunca da a volta no tabuleiro
 	ultima_b: .word 100	#9		#os valores comecam altos porque se nao, os peoes ganhariam o tempo todo
 	ultima_c: .word 100	#20		#o peao precisa dar a volta no tabuleiro para ganhar, quando ele faz 1 volta
 	ultima_d: .word 100	#31		#o valor da sua casa de morte e atualizado para assim fazer a checagem
@@ -59,6 +66,11 @@
 	bordas: .word 208,209,210,211,212,213,214,215,216,217,218,219,220,221,13,29,45,61,77,93,109,125,141,157,173,189,205
 	14,30,46,62,78,94,110,126,142,158,174,190,206,222,238,224,225,226,227,228,229,230,231,232,233,234,235,236,237
 	15,31,47,63,79,95,111,127,143,159,175,191,207,223,239,255,240,241,242,243,244,245,246,247,248,249,250,251,252,253,254
+	
+	tapete_a: .word 97, 98, 99, 100, 101, 117
+	tapete_b: .word 22, 38, 54, 70, 86, 85
+	tapete_c: .word 107, 106, 105, 104, 103, 87
+	tapete_d: .word 182, 166, 150, 134, 118, 119
 	
 	green:  		.word 	0x00CC00
 	dark_green:     	.word 	0x006600
@@ -159,6 +171,7 @@
 	move $s0, $zero 	#boolean de vitoria
 	move $s1, $zero		#endereco do indice no vetor matriz de gp pra mexer nos pixels
 	move $s2, $zero		#guarda o vencedor
+	move $s3, $zero		#instantaneo temporario
 	
 	la $t5,impressao	
 	jalr $t5		#aqui chama a fucao de imprimir
@@ -260,32 +273,32 @@
 			
 	sair_bordas:
 	
-	nascimento:			#essa funcao horrivel ela mostra as pecas logo ao nascerem, antes do primeiro turno
+	nascimento:			#essa funcao horrivel ela foi modif e agora mostra as pecas dormindo
 		
 		lw $t7,dark_yellow
 		move $t5,$zero
-		la $t6,estrelas		
+		la $t6,camas	
 		add $t6,$t6,$t5		
 		lw $s1, 0($t6)		
 		jal pixel		
 		
 		addi $t5,$t5,4
 		lw $t7,dark_blue
-		la $t6,estrelas		
+		la $t6,camas	
 		add $t6,$t6,$t5		
 		lw $s1, 0($t6)		
 		jal pixel
 		
 		addi $t5,$t5,4
 		lw $t7,dark_red
-		la $t6,estrelas		
+		la $t6,camas	
 		add $t6,$t6,$t5		
 		lw $s1, 0($t6)		
 		jal pixel
 		
 		addi $t5,$t5,4
 		lw $t7,dark_green
-		la $t6,estrelas		
+		la $t6,camas	
 		add $t6,$t6,$t5		
 		lw $s1, 0($t6)		
 		jal pixel
@@ -301,60 +314,171 @@
 		li $v0, 42 
 		li $a1,6 		#atualizando dados da funcao random
 		syscall
-
 		addi $a0,$a0,1		#colocar o valor obtido dentro do intervalo de um dado cubico
-		add $t0,$t0,$a0		#a anda o valor aleatorio da casa
 		
 		la $t5,msg_a		#colocar a mensagem que se altera pra cada peao no instantaneo, e da vez ao usuario
 		jal usuario
-
-		bgt $t0,43,Ifa
-		j Endifa
-		Ifa:			#esse comando permite o peao dar a volta no tabuleiro
-			#add $t4,$t0,$zero		#vou deixar essa fora por enquanto, ela serve pra saber se o peao passou da morte
-			addi $t0,$t0,-43		#quando o a da a volta ele tem que ir pra o caminho da vitoria, e nao dar a volta
-		Endifa:
 		
+		lw $t5,status_a		#ve qual o status que o time esta, dormindo, jogando etc
+		beq $t5,0,acordar_a
+		#beq $t5,1,jogar_a
+		beq $t5,2,ganhar_a	#cada possibilidade vai pra um bloco de tratamento diferente
+		
+		la $s3,fim_a		#caso de erro, pois algum dos casos devia ter acontecido
+		jr $s3
+		
+		acordar_a:
+		
+			#bne $a0,6,fim_a		#se tiver tirado 6 com a peca dormindo, ai pode nascer
+			
+			lw $t5,primeira_a
+			la $t6,caminho
+			add $t6,$t6,$t5
+			lb $t5,0($t6)			#olha no indice [nascimento de a] de caminho oq tem la
+			bne $t5,45,fim_a		#so pode nascer se nao tiver peca na casa estrela do time
+			
+
+			lw $t0,primeira_a		#ele pega qual a posicao do time a no caminho
+			lw $t5, a
+			la $t6,caminho
+			add $t6,$t6,$t0
+			sb $t5, 0($t6)			#colocar o time no caminho, bem onde ele nasce
+			
+			lw $t4, dormindo_a
+			lw $t7,yellow
+			lw $s1, dormindo_a		#apagar o rastro de que a peca estava dormindo
+			jal pixel
+			
+			lw $t7,dark_yellow
+			la $t6,estrelas
+			lw $s1,0($t6)			#agora mostrar ela na casa estrela ao nascer
+			jal pixel
+			
+			la $t6,status_a
+			li $t5, 1			#mudar status para 1, pois esta em jogo
+			sw $t5,0($t6)
+			
+			la $t5,impressao	
+			jalr $t5		#aqui chama a fucao de imprimir
+			la $s3,fim_a			#encerrar jogada de a
+			jr $s3
+			
+			
+			
+		jogar_a:
+		
+			add $t0,$t0,$a0		#a ja esta no jogo, entao anda no caminho o valor aleatorio que tirou
+		
+			bgt $t0,43,Ifa
+			j Endifa
+			Ifa:			#esse comando permite o peao dar a volta no tabuleiro
+				addi $t0,$t0,-43		#o a nunca vai dar a volta
+			Endifa:
+			
+				#beq $t0,$t1,comer_b
+			#jalr morrer_b		#e necessario saber se a peca comeu alguem quando andou, mas como?
+			
+			
+			
+			lw $t5,vazio		#pra poder imprimir o '-' (45)
+			la $t6,caminho		#pegar o endereco de caminho
+			add $t6,$t6,$t4		#encontra o endereco do indice a ser modificado
+			sb $t5,0($t6)		#coloca um '-' no indice anterior de a
+			
+			jal devolver_cor	#verifica se ela deixou rastro em uma estrela e ajeita como estava
+			move $t5,$zero
+		
+			la $t6,rota		#pega o mesmo endereco do vetor dos pixels de caminho
+			sll $t5,$t4,2		#tinha um bug porque o backup estava pegando o valor de sair do tabuleiro
+			add $t6,$t6,$t5		#anda nesse endereco anda pro indice encontrado
+			lw $s1, 0($t6)		#pega qual o pixel no vetor-matriz tem que imprimir o pixel preto
+			jal pixel
+			
+			
+			lw $t5,ultima_a
+			slt $s3,$t5,$t0		#se o peao passou da sua morte, entrar no tubo
+			beq $s3,1,entrou_a
+			
+			entrou_a:		#se entrou no tubo, nao entra em caminho, entra apenas no tubo e fica pra ganhar
+			
+				sub $t0,$t0,$t5		#a posicao atual da peca do time, agora no tubo
+				#se t0 for 6, ja ganhou
+				
+				la $t6,status_a
+				li $t5,2
+				sw $t5,0($t6)		#status = modo tubo
+				
+				#status
+				#t0
+				#caminho_tubo
+				#impressao
+				
+				lw $t5,a		
+				la $t6, vitoria_a		
+				add $t6,$t6,$t0		
+				sb $t5,0($t6)		#andar dentro do caminho do tubo
+				
+				lw $t7,dark_yellow
+				la $t6,tapete_a			
+				sll $t5,$t0,2		#pra saber em qual posicao do tubo esta, e pegar esse indice em enderecos de word
+				add $t6,$t6,$t5			
+				lw $s1, 0($t6)		
+				jal pixel
+				
+				la $s3,terminar_imp_a	#terminar turno
+				jr $s3
+				
+			nao_entrou_a:		#se ainda nao entrou no tubo, funcionar normalmente a jogada pelo caminho
+			
+				lw $t5,a		#pra poder imprimir a letra a
+				la $t6,caminho		#pegar o endereco de caminho
+				add $t6,$t6,$t0		#encontra o endereco do indice a ser modificado
+				sb $t5,0($t6)		#coloca a no novo indice de a
+			
+				lw $t7,dark_yellow	#pega a cor do peao
+				la $t6,rota		#endereco do vetor onde esta cada pixel do caminho
+				sll $t5,$t0,2		#multiplica a casa onde a peca esta por 4 (tamanho de word)
+				add $t6,$t6,$t5		#coloca essa casa no endereco pois este indice do vetor e o pixel onde a peca esta
+				lw $s1, 0($t6)		#bota no meu guarda pixel a o valor que esta nesse indice do vetor
+				jal pixel	
+				
+				
+			
+			
+			terminar_imp_a:
+
+			la $t5,impressao	
+			jalr $t5		#aqui chama a fucao de imprimir
+		
+			la $s2,msg_a		#guarda quem fez a ultima jogada em caso dele ser o vencedor
+			la $s3,fim_a
+			jr $s3
+		
+		
+		ganhar_a:
+		
+			
+			
+			la $s2,msg_a
+			lw $t5,ultima_a
+			beq $t4,$t5,fim		#se o peao passou da sua morte, ganhou
+		
+		morrer_a:
+		
+			seq $t5,$t0,$t1
+			seq $t5,$t0,$t2
+			seq $t5,$t0,$t3
+			
+
+			
+			#acontece a morte
+			
+			jr $ra
+		
+		fim_a:
+
 		#mostrar a ------------------- 
 
-		lw $t5,a		#pra poder imprimir a letra a
-		la $t6,caminho		#pegar o endereco de caminho
-		add $t6,$t6,$t0		#encontra o endereco do indice a ser modificado
-		sb $t5,0($t6)		#coloca a no novo indice de a
-		
-		
-		lw $t7,dark_yellow	#pega a cor do peao	
-		move $t5,$zero		
-		
-		la $t6,rota		#endereco do vetor onde esta cada pixel do caminho
-		sll $t5,$t0,2		#multiplica a casa onde a peca esta por 4 (tamanho de word)
-		add $t6,$t6,$t5		#coloca essa casa no endereco pois este indice do vetor e o pixel onde a peca esta
-		lw $s1, 0($t6)		#bota no meu guarda pixel a o valor que esta nesse indice do vetor
-		jal pixel		
-			
-			
-		lw $t5,vazio		#pra poder imprimir o '-' (45)
-		la $t6,caminho		#pegar o endereco de caminho
-		add $t6,$t6,$t4		#encontra o endereco do indice a ser modificado
-		sb $t5,0($t6)		#coloca um '-' no indice anterior de a
-		
-		jal devolver_cor
-		move $t5,$zero
-		
-		la $t6,rota		#pega o mesmo endereco do vetor dos pixels de caminho
-		sll $t5,$t4,2		#tinha um bug porque o backup estava pegando o valor de sair do tabuleiro
-		add $t6,$t6,$t5		#anda nesse endereco anda pro indice encontrado
-		lw $s1, 0($t6)		#pega qual o pixel no vetor-matriz tem que imprimir o pixel preto
-		jal pixel
-		
-
-		la $t5,impressao	
-		jalr $t5		#aqui chama a fucao de imprimir
-		
-		la $s2,msg_a		#guarda quem fez a ultima jogada em caso dele ser o vencedor
-		lw $t5,ultima_a
-		bgt $t4,$t5,fim		#se o peao passou da sua morte, ganhou
-			
 		#mexer b --------------------------------------
 		
 		add $t4,$t1,$zero	#backup fazendo backup
